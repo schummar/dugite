@@ -15,13 +15,27 @@ function resolveEmbeddedGitDir(): string {
   throw new Error('Git not supported on platform: ' + process.platform)
 }
 
+function resolveEmbeddedGitDirForWSL(): string {
+  return path
+    .resolve(__dirname, '..', '..', 'git_platforms', 'linux_x64')
+    .replace(/[\\\/]app.asar[\\\/]/, `${path.sep}app.asar.unpacked${path.sep}`)
+}
+
 /**
  *  Find the path to the embedded Git environment.
  *
  *  If a custom Git directory path is defined as the `LOCAL_GIT_DIRECTORY` environment variable, then
  *  returns with it after resolving it as a path.
  */
-function resolveGitDir(): string {
+function resolveGitDir(wslDistro?: string): string {
+  if (wslDistro) {
+    if (process.env.LOCAL_GIT_DIRECTORY_WSL != null) {
+      return path.resolve(process.env.LOCAL_GIT_DIRECTORY_WSL)
+    } else {
+      return resolveEmbeddedGitDirForWSL()
+    }
+  }
+
   if (process.env.LOCAL_GIT_DIRECTORY != null) {
     return path.resolve(process.env.LOCAL_GIT_DIRECTORY)
   } else {
@@ -32,21 +46,19 @@ function resolveGitDir(): string {
 /**
  *  Find the path to the embedded Git binary.
  */
-function resolveGitBinary(path_: string): {
+function resolveGitBinary(wslDistro?: string): {
   gitLocation: string
   gitArgs: string[]
 } {
-  const [, wslDistro] =
-    path_.match(/\\\\wsl(?:\$|\.localhost)\\([^\\]+)\\/) ?? []
+  const gitDir = resolveGitDir(wslDistro)
 
   if (wslDistro) {
     return {
       gitLocation: 'wsl.exe',
-      gitArgs: ['-d', wslDistro, '-e', 'git'],
+      gitArgs: ['-d', wslDistro, '-e', path.join(gitDir, 'bin', 'git')],
     }
   }
 
-  const gitDir = resolveGitDir()
   if (process.platform === 'win32') {
     return { gitLocation: path.join(gitDir, 'cmd', 'git.exe'), gitArgs: [] }
   } else {
@@ -60,7 +72,14 @@ function resolveGitBinary(path_: string): {
  * If a custom git exec path is given as the `GIT_EXEC_PATH` environment variable,
  * then it returns with it after resolving it as a path.
  */
-function resolveGitExecPath(): string {
+function resolveGitExecPath(wslDistro?: string): string {
+  if (wslDistro) {
+    if (process.env.GIT_EXEC_PATH_WSL != null) {
+      return path.resolve(process.env.GIT_EXEC_PATH_WSL)
+    }
+    return path.join(resolveGitDir(wslDistro), 'libexec', 'git-core')
+  }
+
   if (process.env.GIT_EXEC_PATH != null) {
     return path.resolve(process.env.GIT_EXEC_PATH)
   }
@@ -92,12 +111,15 @@ export function setupEnvironment(
   gitLocation: string
   gitArgs: string[]
 } {
-  const { gitLocation, gitArgs } = resolveGitBinary(path)
+  const [, wslDistro] =
+    path.match(/\\\\wsl(?:\$|\.localhost)\\([^\\]+)\\/) ?? []
+
+  const { gitLocation, gitArgs } = resolveGitBinary(wslDistro)
 
   let envPath: string = process.env.PATH || ''
-  const gitDir = resolveGitDir()
+  const gitDir = resolveGitDir(wslDistro)
 
-  if (process.platform === 'win32') {
+  if (process.platform === 'win32' && !wslDistro) {
     if (process.arch === 'x64') {
       envPath = `${gitDir}\\mingw64\\bin;${gitDir}\\mingw64\\usr\\bin;${envPath}`
     } else {
@@ -109,13 +131,13 @@ export function setupEnvironment(
     {},
     process.env,
     {
-      GIT_EXEC_PATH: resolveGitExecPath(),
+      GIT_EXEC_PATH: resolveGitExecPath(wslDistro),
       PATH: envPath,
     },
     environmentVariables
   )
 
-  if (gitLocation === 'wsl.exe') {
+  if (wslDistro) {
     // Forward certain environment variables to WSL to allow authentication.
     // The /p flag translates windows<->wsl paths.
     env.WSLENV = [
@@ -126,6 +148,9 @@ export function setupEnvironment(
       'DESKTOP_PORT',
       'DESKTOP_TRAMPOLINE_TOKEN',
       'DESKTOP_TRAMPOLINE_IDENTIFIER',
+      'GIT_EXEC_PATH/p',
+      'GIT_TEMPLATE_DIR/p',
+      'PREFIX/p',
     ]
       .filter(Boolean)
       .join(':')
@@ -142,27 +167,36 @@ export function setupEnvironment(
     }
   }
 
-  if (process.platform === 'darwin' || process.platform === 'linux') {
+  if (
+    process.platform === 'darwin' ||
+    process.platform === 'linux' ||
+    wslDistro
+  ) {
     // templates are used to populate your .git folder
     // when a repository is initialized locally
     const templateDir = `${gitDir}/share/git-core/templates`
     env.GIT_TEMPLATE_DIR = templateDir
   }
 
-  if (process.platform === 'linux') {
+  if (process.platform === 'linux' || wslDistro) {
     // when building Git for Linux and then running it from
     // an arbitrary location, you should set PREFIX for the
     // process to ensure that it knows how to resolve things
     env.PREFIX = gitDir
 
-    if (!env.GIT_SSL_CAINFO && !env.LOCAL_GIT_DIRECTORY) {
+    if (
+      !env.GIT_SSL_CAINFO &&
+      !(wslDistro ? env.LOCAL_GIT_DIRECTORY_WSL : env.LOCAL_GIT_DIRECTORY)
+    ) {
       // use the SSL certificate bundle included in the distribution only
       // when using embedded Git and not providing your own bundle
-      const distDir = resolveEmbeddedGitDir()
+      const distDir = resolveGitDir(wslDistro)
       const sslCABundle = `${distDir}/ssl/cacert.pem`
       env.GIT_SSL_CAINFO = sslCABundle
     }
   }
+
+  console.log('use', gitLocation, gitArgs, env)
 
   return { env, gitLocation, gitArgs }
 }
