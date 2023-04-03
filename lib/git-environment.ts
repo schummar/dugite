@@ -17,7 +17,7 @@ function resolveEmbeddedGitDir(): string {
 
 function resolveEmbeddedGitDirForWSL(): string {
   return path
-    .resolve(__dirname, '..', '..', 'git_platforms', 'linux_x64')
+    .resolve(__dirname, '..', '..', 'git_platforms', 'linux-x64')
     .replace(/[\\\/]app.asar[\\\/]/, `${path.sep}app.asar.unpacked${path.sep}`)
 }
 
@@ -55,7 +55,12 @@ function resolveGitBinary(wslDistro?: string): {
   if (wslDistro) {
     return {
       gitLocation: 'wsl.exe',
-      gitArgs: ['-d', wslDistro, '-e', path.join(gitDir, 'bin', 'git')],
+      gitArgs: [
+        '-d',
+        wslDistro,
+        '-e',
+        toWSLPath(path.join(gitDir, 'bin', 'git')),
+      ],
     }
   }
 
@@ -93,6 +98,22 @@ function resolveGitExecPath(wslDistro?: string): string {
   } else {
     return path.join(gitDir, 'libexec', 'git-core')
   }
+}
+
+export function toWSLPath(windowsPath: string) {
+  const [, drive, path] = windowsPath.match(/([a-zA-Z]):(.*)/) ?? []
+
+  if (!drive || !path) {
+    throw new Error(`Invalid windows path: ${windowsPath}`)
+  }
+
+  console.log(
+    `Converting ${windowsPath} to /mnt/${drive.toLowerCase()}${path.replace(
+      /\\/g,
+      '/'
+    )}`
+  )
+  return `/mnt/${drive.toLowerCase()}${path.replace(/\\/g, '/')}`
 }
 
 /**

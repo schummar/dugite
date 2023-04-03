@@ -7,7 +7,7 @@ const embeddedGit = require('./embedded-git.json')
 
 function getConfig() {
   const config = {
-    outputPath: path.join(__dirname, '..', 'git'),
+    outputPath: path.join(__dirname, '..', 'git', 'default'),
     source: '',
     checksum: '',
     fileName: '',
@@ -54,7 +54,7 @@ function getConfig() {
     const entry = embeddedGit['linux-x64']
 
     const wslConfig = {
-      outputPath: path.join(__dirname, '..', 'git_platforms', 'linux-x64'),
+      outputPath: path.join(__dirname, '..', 'git', 'linux-x64'),
       source: entry.url,
       checksum: entry.checksum,
       fileName: '',
